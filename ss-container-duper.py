@@ -52,8 +52,11 @@ def get_new_conf(conf_file):
     if not c.read(conf_file):
         print "Unable to read config file %s" % conf_file
         sys.exit(1)
-    d = dict(c.items("default"))
-    r = requests.get(d["auth_path"], headers={"x-auth-user": d["username"], "x-auth-key": d["password"]})
+    d = dict(c.items("DEFAULT"))
+    try:
+        r = requests.get(d["auth_path"], headers={"x-auth-user": d["username"], "x-auth-key": d["password"]})
+    except Exception, e:
+        print ("hit a problem to get_new_conf: %s" % r.status_code)
     _TOKEN = r.headers["x-storage-token"]
     _STORAGE_URI = d["host"]+"/v1/"
     _ACCOUNT_NAME = "AUTH_"+d["username"] 
@@ -95,13 +98,10 @@ def get_container_list(account):
     object_ring = Ring(swift_dir, ring_name="object")
     part, nodes = account_ring.get_nodes(account)
 
-    #[FIXME] change the library to requests 
     URL="http://%s:%s/%s/%s/%s" % (nodes[0]['ip'], nodes[0]['port'], nodes[0]['device'], part, account)
+    r = requests.get(URL)
+    content = str(r.text)
     req = urllib2.Request(URL)
-    #Direct connect to account server bypass proxy
-    resp = urllib2.urlopen(req)
-    content = resp.read()
-    headers = resp.info()
     container_list_hash = hashlib.md5(content).hexdigest()
     content = content.split("\n")
     content.remove('')
