@@ -56,7 +56,7 @@ def get_new_conf(conf_file):
     try:
         r = requests.get(d["auth_path"], headers={"x-auth-user": d["username"], "x-auth-key": d["password"]})
     except Exception, e:
-        print ("hit a problem to get_new_conf: %s" % r.status_code)
+        logger.warning("hit a problem to get_new_conf: %s" % r.status_code)
     _TOKEN = r.headers["x-storage-token"]
     _STORAGE_URI = d["host"]+"/v1/"
     _ACCOUNT_NAME = "AUTH_"+d["username"] 
@@ -100,6 +100,8 @@ def get_container_list(account):
 
     URL="http://%s:%s/%s/%s/%s" % (nodes[0]['ip'], nodes[0]['port'], nodes[0]['device'], part, account)
     r = requests.get(URL)
+    if r.status_code == 404:
+        logger.warning("Account not existing yet")
     content = str(r.text)
     req = urllib2.Request(URL)
     container_list_hash = hashlib.md5(content).hexdigest()
