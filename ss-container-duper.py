@@ -159,8 +159,8 @@ if __name__ == '__main__':
 
     #Configuration Parser from pickle DB
     TOKEN = DB_conf.get("TOKEN", "empty")
-    ACCOUNT_NAME = DB_conf.get("ACCOUNT_NAME", "empty")
-    STORAGE_URI = DB_conf.get("STORAGE_URI", "http://empty")
+    ACCOUNT_NAME = DB_conf.get("ACCOUNT_NAME", "")
+    STORAGE_URI = DB_conf.get("STORAGE_URI", "http://0.0.0.0")
 
     if not check_connection():
         TOKEN, ACCOUNT_NAME, STORAGE_URI = get_new_conf(CONF_FILE)
