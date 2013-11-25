@@ -39,6 +39,7 @@ swift_dir = "/etc/swift/"
 log_path = "/var/log/swift/ss-container-duper.log"
 log_level = logging.INFO
 
+# Define logger 
 logger = logging.getLogger('__name__')
 hdlr = logging.FileHandler(log_path)
 formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
@@ -84,9 +85,11 @@ def gen_rev_container(container):
     rev_req = requests.put(URL+rev, headers={"x-auth-token":TOKEN})
     ver_req = requests.put(URL+ver, headers={"x-auth-token":TOKEN})
     
-    logger.info("Create Recovery & Version Containers for %s , status %s:%s" % (container,rev_req.status_code,ver_req.status_code))
-    if rev_req.status_code >= 200 and rev_req.status_code < 350 and ver_req.status_code >= 200 and ver_req.status_code < 350:
-        version_header = requests.put(URL+rev, headers={"x-auth-token":TOKEN, "X-Versions-Location":ver})
+    logger.info("Create Recovery & Version Containers for %s , status %s:%s" 
+                                 % (container, rev_req.status_code, ver_req.status_code))
+    if 200 <= rev_req.status_code < 300 and 200 <= ver_req.status_code < 300:
+        version_header = requests.put(URL+rev, headers={"x-auth-token":TOKEN, 
+                                                        "X-Versions-Location":ver})
 
     return rev_req.status_code, ver_req.status_code, version_header.status_code
 
@@ -98,7 +101,8 @@ def get_container_list(account):
     object_ring = Ring(swift_dir, ring_name="object")
     part, nodes = account_ring.get_nodes(account)
 
-    URL="http://%s:%s/%s/%s/%s" % (nodes[0]['ip'], nodes[0]['port'], nodes[0]['device'], part, account)
+    URL="http://%s:%s/%s/%s/%s" % (nodes[0]['ip'], nodes[0]['port'], nodes[0]['device'],
+                                   part, account)
     r = requests.get(URL)
     if r.status_code == 404:
         logger.warning("Account not existing yet")
