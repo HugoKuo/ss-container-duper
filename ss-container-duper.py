@@ -48,20 +48,33 @@ logger.addHandler(hdlr)
 logger.setLevel(log_level)
 
 def get_new_conf(conf_file):
-    #Parse config from configuration file
+    #Parse config from configuration file. Return a dict
+    # d_new_conf = {"token": "",
+    #               "URI": "",    
+    #               "account_name": "",
+    #               "recovery_account": ""}
     c = ConfigParser()
     if not c.read(conf_file):
         print "Unable to read config file %s" % conf_file
         sys.exit(1)
-    d = dict(c.items("DEFAULT"))
+    d = dict(c.items("DEFAULT"))   
     try:
         r = requests.get(d["auth_path"], headers={"x-auth-user": d["username"], "x-auth-key": d["password"]})
     except Exception, e:
         logger.warning("hit a problem to get_new_conf: %s" % r.status_code)
-    _TOKEN = r.headers["x-storage-token"]
-    _STORAGE_URI = d["host"]+"/v1/"
-    _ACCOUNT_NAME = "AUTH_"+d["username"] 
-    return _TOKEN, _ACCOUNT_NAME, _STORAGE_URI
+    
+    d_new_conf["token"] = r.headers["x-storage-token"]
+    d_new_conf["URI"] = d["host"]+"/v1/"
+    d_new_conf["account_name"] = "AUTH_"+d["username"]
+    
+    if d["super_mode"] and d["super_mode"] == True:
+        _ACCOUNT_NAME = "AUTH_"+d["account_name"]
+        d_new_conf["account_name"] = _ACCOUNT_NAME
+        #FIXE ME
+        d_new_conf["recovery_account"] = _ACCOUNT_NAME+"_recovery"
+        d_new_conf["super_mode"] = True
+       
+    return d_new_conf
     
 def check_connection():
     #emit a account head to proxy and check the status code if != 204 call get_new_conf
@@ -72,7 +85,7 @@ def check_connection():
         rr = 1
     return rr
 
-def gen_rev_container(container):
+def gen_rev_container(container,account=None,rev_account=None):
     #This function will create .rev & .ver containers
     #And setup the .ver as the versioning dest of .rev
     #Return status code of each request 
@@ -82,6 +95,8 @@ def gen_rev_container(container):
     rev = ".rev_"+container
     ver = ".ver_"+container
     URL = STORAGE_URI+ACCOUNT_NAME+"/"
+    if rev_account:
+        URL = STORAGE_URI+rev_account+"/"
     rev_req = requests.put(URL+rev, headers={"x-auth-token":TOKEN})
     ver_req = requests.put(URL+ver, headers={"x-auth-token":TOKEN})
     
@@ -120,8 +135,10 @@ def container_filter(containers, st="."):
                 containers.remove(i)
     return containers
 
-def get_obj_etag_dict(container):
+def get_obj_etag_dict(container, account=None, rev_account=None):
     URL = STORAGE_URI+ACCOUNT_NAME+"/"
+    if rev_account:
+        URL = STORAGE_URI+rev_account+"/"
     objs = requests.get(URL+container+"?format=JSON", headers={"x-auth-token":TOKEN})
     objs_list = eval(objs.text)
     objs_dict = {}
@@ -129,9 +146,10 @@ def get_obj_etag_dict(container):
         objs_dict[i["name"]]=i["hash"]
     return objs_dict
 
-def x_copy_object(container, obj):
+def x_copy_object(container, obj, rev_account=None):
     #Performing the server-side copy of the object to .rev container
     URL = STORAGE_URI+ACCOUNT_NAME
+
     REV = "/.rev_"+container+"/"+obj
     objs = requests.put(URL+REV, headers={"x-auth-token":TOKEN, 
                                          "x-copy-from": "/"+container+"/"+obj, 
@@ -169,33 +187,54 @@ if __name__ == '__main__':
     STORAGE_URI = DB_conf.get("STORAGE_URI", "http://0.0.0.0")
 
     if not check_connection():
-        TOKEN, ACCOUNT_NAME, STORAGE_URI = get_new_conf(CONF_FILE)
-        DB_conf["TOKEN"] = TOKEN
+        NEW_CONFG = get_new_conf(CONF_FILE)
+        TOKEN = NEW_CONFG["token"]
+        ACCOUNT_NAME = NEW_CONFG["account_name"] 
+        STORAGE_URI = NEW_CONFG["URI"]
+
+        #If super Mode enabled, get the recovery account
+        if NEW_CONFG["super_mode"]:
+            REV_ACCOUNT = NEW_CONFG("recovery_account")
+            DB_conf["REV_ACCOUNT"] = REV_ACCOUNT
+            DB_conf["super_mode"] = True
+
         DB_conf["ACCOUNT_NAME"] = ACCOUNT_NAME
         DB_conf["STORAGE_URI"] = STORAGE_URI
 
  
-    #Retrieve container list 
+    #Retrieve container list ｀
     containers, containers_hash = get_container_list(ACCOUNT_NAME)
-
+            
     #Check new added containers 
     #Compare each container_name with DB, if not there, add it
     if containers_hash != DB_dict["pre_list_hash"]: 
-        containers_temp = containers[:]
-        for i in containers_temp:
-            if i.startswith('.'):
-                containers.remove(i)
+        containers = container_filter(containers=containers)
+        #containers_temp = containers[:]
+        #for i in containers_temp:
+        #    if i.startswith('.'):
+        #        containers.remove(i)
         
         #Create rev, ver containers for the new one
         for i in containers:
             if not DB_dict.has_key(i):
-                gen_rev_container(i) 
+                if DB_conf["REV_ACCOUNT"]:
+                    gen_rev_container(i, rev_account=DB_conf["REV_ACCOUNT"])
+                else:    
+                    gen_rev_container(i) 
         logger.info("Found new container, update the list hash in DB")
     #Retrieve/renew the new containers list
     #Write new data into pickleDB
     containers, containers_hash = get_container_list(ACCOUNT_NAME)
     DB_dict["pre_list_hash"] = containers_hash
     
+    #Retrieve Recovery account's container list hash
+    if DB_conf["REV_ACCOUNT"]:
+        rev_containers, rev_containers_hash = get_container_list(DB_conf["REV_ACCOUNT"])
+        DB_dict["rev_list_hash"] = rev_containers_hash
+        for i in rev_containers:
+            DB_dict[i]="New Added"
+        else:
+            DB_dict[i]="re-checked"
 
     for i in containers:
         if not DB_dict.has_key(i):
@@ -205,9 +244,13 @@ if __name__ == '__main__':
     
     #Verifying all containers has .rev & .ver under the account
     pure_list = container_filter(containers=containers)
+
     for i in pure_list:
         if (not DB_dict.has_key(".rev_"+i)) or (not DB_dict.has_key(".ver_"+i)):
-            gen_rev_container(i)
+            if DB_conf["REV_ACCOUNT"]:
+                gen_rev_container(i, rev_account=DB_conf["REV_ACCOUNT"])
+            else:    
+                gen_rev_container(i) 
             DB_dict[".rev_"+i] = "new added"
             DB_dict[".ver_"+i] = "new added"
 
@@ -218,8 +261,9 @@ if __name__ == '__main__':
     for i in pure_list:
         #Get object list of each container
         objs_etag_dict = get_obj_etag_dict(i)
-        objs_etag_dict_rev = get_obj_etag_dict(".rev_"+i)
-        for obj in objs_etag_dict:
+        if DB_conf["REV_ACCOUNT"]:
+            objs_etag_dict_rev = get_obj_etag_dict(".rev_"+i, rev_account=DB_conf["REV_ACCOUNT"])
+            for obj in objs_etag_dict:
             if not objs_etag_dict_rev.has_key(obj):
                 #x-copy
                 st, etag = x_copy_object(i,obj)
@@ -229,6 +273,20 @@ if __name__ == '__main__':
             else: 
                 passing = "True"
             DB_dict[i+"/"+obj] = objs_etag_dict[obj]
+                
+        else:    
+            objs_etag_dict_rev = get_obj_etag_dict(".rev_"+i)
+            for obj in objs_etag_dict:
+            if not objs_etag_dict_rev.has_key(obj):
+                #x-copy
+                st, etag = x_copy_object(i,obj)
+            elif objs_etag_dict[obj] != objs_etag_dict_rev[obj]:
+                #x-copy
+                st, etag = x_copy_object(i,obj)
+            else: 
+                passing = "True"
+            DB_dict[i+"/"+obj] = objs_etag_dict[obj]    
+        
                     
     pickle.dump(DB_tuple, open(RECORD, "wb"), True)
     #logger.info(DB_tuple)
