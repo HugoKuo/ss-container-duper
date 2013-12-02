@@ -67,9 +67,12 @@ def check_connection():
     #emit a account head to proxy and check the status code if != 204 call get_new_conf
     URL = STORAGE_URI+ACCOUNT_NAME+"/"
     rr = 0
-    r = requests.head(URL, headers={"x-auth-token": TOKEN})
-    if r.status_code == 204:
-        rr = 1
+    try:
+        r = requests.head(URL, headers={"x-auth-token": TOKEN})
+        if r.status_code == 204:
+            rr = 1
+    except:
+        pass
     return rr
 
 def gen_rev_container(container):
